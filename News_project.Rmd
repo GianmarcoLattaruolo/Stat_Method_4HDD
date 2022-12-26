@@ -1,0 +1,61 @@
+---
+title: "News classification"
+subtitle: "Statistical MEthods for High Dimensional Data Project"
+author: "add your name"
+font: 12pt
+output:
+  html_document: 
+    toc: yes
+  pdf_document: 
+    toc: yes
+    toc_depth: 4
+editor_options: 
+  chunk_output_type: inline
+---
+
+# 1. The dataset
+
+
+
+## 1.1 Dataset description
+
+
+ 
+
+
+```{r load data, warning=FALSE}
+
+```
+
+
+
+## 1.2 Cleaning
+
+
+```{r clean NULL variables}
+
+```
+
+
+# 2. Data exploration
+
+## 2.1 Summary
+
+
+```{r summary of the data, echo=FALSE, message=FALSE, warning=FALSE, results="asis"}
+
+```
+
+
+
+## 3.1 Generalized linear model
+
+Using a generalized linear model from library `glm` we can fit our data and after this update the model.
+$$
+logit(x)=\ln\left(\frac{x}{1-x}\right)
+$$
+\
+```{r glm applied, warning=FALSE}
+ 
+```
+\
