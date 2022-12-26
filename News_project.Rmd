@@ -16,6 +16,13 @@ editor_options:
 # 1. The dataset
 
 
+```{r import data}
+data <- read.csv("labelled_newscatcher_dataset.csv", row.names=NULL, sep=';')
+
+#install.packages('tm')
+library(tm)
+library(glmnet)
+```
 
 ## 1.1 Dataset description
 
@@ -34,6 +41,16 @@ editor_options:
 
 ```{r clean NULL variables}
 
+# cleaning the text
+corpus = Corpus(VectorSource(data$title))
+corpus = tm_map(corpus, PlainTextDocument)
+corpus = tm_map(corpus, tolower)
+corpus = tm_map(corpus, removePunctuation)
+corpus = tm_map(corpus, removeWords, c("news", stopwords("english")))
+
+corpus[[1]][1]
+
+
 ```
 
 
@@ -43,6 +60,12 @@ editor_options:
 
 
 ```{r summary of the data, echo=FALSE, message=FALSE, warning=FALSE, results="asis"}
+# creating the frequencies matrix
+frequencies = DocumentTermMatrix(corpus)
+sparse = removeSparseTerms(frequencies, 0.995)
+tSparse = as.data.frame(as.matrix(sparse))
+colnames(tSparse) = make.names(colnames(tSparse))
+tSparse$topic = as.factor(data$topic)
 
 ```
 
@@ -57,5 +80,24 @@ $$
 \
 ```{r glm applied, warning=FALSE}
  
+# train test split
+set.seed(123)
+size <- floor(0.8 * nrow(tSparse))
+mask <- sample(seq_len(nrow(tSparse)), size=size)
+train <- tSparse[mask, ]
+test <- tSparse[-mask, ]
+
+train$topic
+
+train2 <- train[,!names(train) %in% c("topic")]
+test2 <- test[,!names(test) %in% c("topic")]
+
+lm<- cv.glmnet(train2,train$topic, family= "multinomial",nfolds = 3,grouped = TRUE,type.measure = "class")
+
+pred.train <- predict(lm)
+pred.test <- predict(lm, newdata = test2)
+
+table(train$topic, pred.train)
+table(test$topic, pred.test)
 ```
 \
