@@ -1,21 +1,21 @@
 ---
 title: "News classification"
-subtitle: "Statistical MEthods for High Dimensional Data Project"
+subtitle: "Statistical Methods for High Dimensional Data Project"
 author: "add your name"
 font: 12pt
 output:
-  html_document: 
-    toc: yes
   pdf_document: 
     toc: yes
     toc_depth: 4
+  html_notebook: 
+    toc: yes
 editor_options: 
   chunk_output_type: inline
 ---
 
 # 1. The dataset
 
-
+We load the dataset and the required libraries.
 ```{r import data}
 data <- read.csv("labelled_newscatcher_dataset.csv", row.names=NULL, sep=';')
 
@@ -26,11 +26,19 @@ library(glmnet)
 
 ## 1.1 Dataset description
 
+The csv file contains 108774 articles for 8 different news topics, published over the first half of August 2020. The topics are:
+* BUSINESS 
+* ENTERTAINMENT 
+* HEALTH
+* NATION
+* SCIENCE
+* SPORTS
+* TECHNOLOGY
+* WORLD
 
- 
+All topics have 15k articles except for SCIENCE which is 3774. Those articles are published by thousands of different news websites.
 
-
-```{r load data, warning=FALSE}
+```{r , warning=FALSE}
 
 ```
 
@@ -39,7 +47,7 @@ library(glmnet)
 ## 1.2 Cleaning
 
 
-```{r clean NULL variables}
+```{r clean the text, warning=FALSE}
 
 # cleaning the text
 corpus = Corpus(VectorSource(data$title))
@@ -48,9 +56,8 @@ corpus = tm_map(corpus, tolower)
 corpus = tm_map(corpus, removePunctuation)
 corpus = tm_map(corpus, removeWords, c("news", stopwords("english")))
 
-corpus[[1]][1]
-
-
+data$title[1]
+corpus[[1]][1]$content
 ```
 
 
