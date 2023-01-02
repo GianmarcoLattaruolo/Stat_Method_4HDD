@@ -17,12 +17,20 @@ editor_options:
 
 We load the dataset and the required libraries.
 ```{r import data}
-data <- read.csv("labelled_newscatcher_dataset.csv", row.names=NULL, sep=';')
+library('parallel')
+library('quanteda')
+library('quanteda.textplots')
+library('glmnet')
+library('doMC')
+library('sparseSVM')
 
-#install.packages('tm')
-library(tm)
-library(glmnet)
+#id <- "1t_bpJX7PC0dqZ5pEmaxM8wmDJteYmOXB" # google file ID
+#news1 <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", id), row.names=NULL, sep = ';')
+
+news <- read.csv("labelled_newscatcher_dataset.csv", row.names=NULL, sep=';')
+nrow(news)
 ```
+
 
 ## 1.1 Dataset description
 
@@ -38,8 +46,12 @@ The csv file contains 108774 articles for 8 different news topics, published ove
 
 All topics have 15k articles except for SCIENCE which is 3774. Those articles are published by thousands of different news websites.
 
-```{r , warning=FALSE}
-
+```{r train and test set split, warning=FALSE}
+set.seed(123)
+size <- floor(0.8 * nrow(news))
+mask <- sample(seq_len(nrow(news)), size=size)
+data_train <- news[mask, ]
+data_test <- news[-mask, ]
 ```
 
 
@@ -47,64 +59,243 @@ All topics have 15k articles except for SCIENCE which is 3774. Those articles ar
 ## 1.2 Cleaning
 
 
-```{r clean the text, warning=FALSE}
-
-# cleaning the text
-corpus = Corpus(VectorSource(data$title))
-corpus = tm_map(corpus, PlainTextDocument)
-corpus = tm_map(corpus, tolower)
-corpus = tm_map(corpus, removePunctuation)
-corpus = tm_map(corpus, removeWords, c("news", stopwords("english")))
-
-data$title[1]
-corpus[[1]][1]$content
+```{r document frequency matrix, warning=FALSE}
+set.seed(123)
+size <- floor(0.8 * nrow(news))
+mask <- sample(seq_len(nrow(news)), size=size)
+data_train <- news[mask, ]
+data_test <- news[-mask, ]
 ```
 
+
+```{r document frequency in train}
+prepare_dfm <- function(src, fit=TRUE, words_to_include=NULL){
+  # does the preprocessing steps, returns a dfm
+  # fit=TRUE trims based on frequency
+  # fit=FALSE makes the features=words_to_include
+  tokens <- quanteda::tokens(src,remove_punct = TRUE,
+            remove_symbols = TRUE,
+            remove_numbers = TRUE,
+            remove_url = TRUE,)
+  dfm <- quanteda::dfm(tokens)
+  dfm <- quanteda::dfm_remove(dfm,stopwords('english'))
+  dfm <- quanteda::dfm_wordstem(dfm)
+  if(fit) {
+    dfm <- quanteda::dfm_trim(dfm, min_docfreq = 8)
+  } else {
+    dfm <- quanteda::dfm_match(dfm, words_to_include)
+  }
+  return(dfm)
+}
+```
+
+```{r}
+dfm_train <- prepare_dfm(data_train$title)
+dfm_test <- prepare_dfm(data_test$title, fit=FALSE, words_to_include = featnames(dfm_train))
+```
+
+
+```{r tf-idf, calculated on train}
+
+# tf-idf, calculated on train
+# weight the matrices with tf
+x_train <- quanteda::dfm_weight(dfm_train, scheme='prop')
+x_test <- quanteda::dfm_weight(dfm_test, scheme='prop')
+# calculate idfs on train
+idfs <- docfreq(dfm_train, scheme='inverse')
+# weight by idfs
+x_train <- quanteda::dfm_weight(x_train, weights=idfs, force=TRUE)
+x_test <- quanteda::dfm_weight(x_test, weights=idfs, force=TRUE)
+
+y_train <- as.factor(news$topic)[mask]
+y_test <- as.factor(news$topic)[-mask]
+```
+idk if we need a word cloud but it looks pretty 
 
 # 2. Data exploration
+```{r}
+dfm_news <- prepare_dfm(news$title)
+x_news <- quanteda::dfm_weight(dfm_news, scheme='boolean')
+y_news <- as.factor(news$topic)
+plot(sort(colSums(x_news)),log='y')
+```
 
-## 2.1 Summary
+
+```{r}
+par(mfrow = c(1,1))
+docvars(x_news, 'topic') <- news$topic
+
+for (i in c('TECHNOLOGY', 'BUSINESS', 'WORLD' ,'SCIENCE' ,'HEALTH', 'ENTERTAINMENT' ,'SPORTS', 'NATION')){
+  topic.todisplay <- i
+  textplot_wordcloud(
+    dfm_subset(x_news, topic==topic.todisplay),
+    color=rev(RColorBrewer::brewer.pal(10, "RdBu")),
+    max_words = 150
+  )
+  print(i)
+}
+
+```
+
+# Models 
+
+## Multinomial Logistic Regression, cross validation for alpha and lambda
+```{r}
+registerDoMC()
+
+foldid <- sample(1:3, size = length(y_train), replace = TRUE)
+cv1 <- cv.glmnet(x_train, y_train, family="multinomial", type.measure="class", nfolds=3, parallel=TRUE, foldid = foldid, alpha = 1)
+cv.5 <- cv.glmnet(x_train, y_train, family="multinomial", type.measure="class", nfolds=3, parallel=TRUE, foldid = foldid, alpha = 0.5)
+cv0 <- cv.glmnet(x_train, y_train, family="multinomial", type.measure="class", nfolds=3, parallel=TRUE, foldid = foldid, alpha = 0)
+cv.8 <- cv.glmnet(x_train, y_train, family="multinomial",type.measure="class", nfolds=3, parallel=TRUE, foldid = foldid, alpha = 0.8)
+cv.2 <- cv.glmnet(x_train, y_train, family="multinomial",type.measure="class", nfolds=3, parallel=TRUE, foldid = foldid, alpha = 0.2)
+```
 
 
-```{r summary of the data, echo=FALSE, message=FALSE, warning=FALSE, results="asis"}
-# creating the frequencies matrix
-frequencies = DocumentTermMatrix(corpus)
-sparse = removeSparseTerms(frequencies, 0.995)
-tSparse = as.data.frame(as.matrix(sparse))
-colnames(tSparse) = make.names(colnames(tSparse))
-tSparse$topic = as.factor(data$topic)
+```{r}
+c(min(cv0$cvm), min(cv.2$cvm), min(cv.5$cvm), min(cv.8$cvm), min(cv1$cvm))
+```
 
+
+We can see that the best result is achieved using ridge regression. Let's plot the results for the alpha - 1, 0.5 and 0
+
+
+```{r}
+par(mfrow = c(2,2))
+plot(cv1); plot(cv.5); plot(cv0);
+plot(log(cv1$lambda) , cv1$cvm , pch = 19, col = "red",
+xlab = "log(Lambda)", ylab = cv1$name)
+points(log(cv.2$lambda), cv.5$cvm, pch = 19, col = "grey")
+points(log(cv0$lambda) , cv0$cvm , pch = 19, col = "blue")
+legend("topleft", legend = c("alpha= 1", "alpha= .2", "alpha 0"),pch = 19, col = c("red","grey","blue"))
+```
+
+
+Let's make a prediction using the model with alpha = 0
+
+```{r}
+pred.train <- predict(cv0, newx = x_train, type="class")
+pred.test <- predict(cv0, newx=x_test, type="class")
+print(mean(y_train==pred.train))
+print(mean(y_test==pred.test))
+```
+
+
+The best model gives the accuracy on the test set 79.2%
+
+Plot the word cloud based on the absolute value of the coefficients 
+
+```{r plot worldcloud with coefficients}
+plot_coefs <- function(coefs, features) {
+	dfm.coefs <- quanteda::dfm(tokens(''))
+	dfm.coefs <- dfm_match(dfm.coefs, features) + 1
+	abs.coefs <- abs(as.vector(coefs)[-1])
+	names(abs.coefs) <- features
+	dfm.coefs <- dfm_weight(dfm.coefs, weights=abs.coefs,force=TRUE)
+	textplot_wordcloud(
+		dfm.coefs,
+		color=rev(RColorBrewer::brewer.pal(10, "RdBu")),
+    max_words = 100)
+}
+```
+
+
+```{r plot worldcloud with coefficients}
+plot_coefs(coef(cv1)$HEALTH, featnames(x_train))
 ```
 
 
 
-## 3.1 Generalized linear model
+## Sparse SVM
 
-Using a generalized linear model from library `glm` we can fit our data and after this update the model.
-$$
-logit(x)=\ln\left(\frac{x}{1-x}\right)
-$$
-\
-```{r glm applied, warning=FALSE}
- 
-# train test split
+Now we try to implement a sparse SVM with lasso penalty. We know by the theory that the results should be similar to logistic lasso.
+
+Unforntunately for this model the RAM size is a severe bottle neck and thus we can use only a fraction $\rho$ of the original dataset as training set.
+Moreover the package sparseSVM can implement only binary classification so we need to implement a one-vs-rest approach in a for loop.
+
+First of all we implement a cross validation for few categories to have an idea of the range values for lambda. Then, with these lambdas we implement the loop.
+```{r}
+#dataset reduction
 set.seed(123)
-size <- floor(0.8 * nrow(tSparse))
-mask <- sample(seq_len(nrow(tSparse)), size=size)
-train <- tSparse[mask, ]
-test <- tSparse[-mask, ]
+rho = 0.1
+size <- floor(rho * nrow(x_train))
+mask <- sample(seq_len(nrow(x_train)), size=size)
+x_train_small <- x_train[mask, ]
+y_train_svm <- y_train[mask]
 
-train$topic
-
-train2 <- train[,!names(train) %in% c("topic")]
-test2 <- test[,!names(test) %in% c("topic")]
-
-lm<- cv.glmnet(train2,train$topic, family= "multinomial",nfolds = 3,grouped = TRUE,type.measure = "class")
-
-pred.train <- predict(lm)
-pred.test <- predict(lm, newdata = test2)
-
-table(train$topic, pred.train)
-table(test$topic, pred.test)
+#for parallel computing we need a matrix
+x_train_svm <- as.matrix(x_train_small)
 ```
-\
+
+```{r}
+tec <- c(y_train_svm=='TECHNOLOGY')+0
+
+cv.svm <- cv.sparseSVM(x_train_svm, tec, nfolds = 6 , ncores = 2)
+cv.svm$lambda.min
+plot(cv.svm)
+rule1se <- max(cv.svm$lambda[cv.svm$cve <= min(cv.svm$cve)+cv.svm$cvse[cv.svm$min]])
+abline(v=log(cv.svm$lambda.min))
+abline(v=log(rule1se),col="green", lty=2)
+
+busi <- c(y_train_svm=='BUSINESS')+0
+
+cv.svm <- cv.sparseSVM(x_train_svm, busi, nfolds = 6 , ncores = 2)
+cv.svm$lambda.min
+plot(cv.svm)
+rule1se <- max(cv.svm$lambda[cv.svm$cve <= min(cv.svm$cve)+cv.svm$cvse[cv.svm$min]])
+abline(v=log(cv.svm$lambda.min))
+abline(v=log(rule1se),col="green", lty=2)
+
+# with one tenth of the original training set this cell requires 6 minutes
+```
+
+
+
+From now on we set as grid of values for lambda 10 values. In the following for loop the predicted values are independently computed for each class. 
+
+```{r}
+x_test_svm <- as.matrix(x_test)
+
+topics <- c('TECHNOLOGY', 'BUSINESS', 'WORLD' ,'SCIENCE' ,'HEALTH', 'ENTERTAINMENT' ,'SPORTS', 'NATION')
+primes <- c(3,5,7,11,13,17,19,23)
+i=1
+acc <- c()
+final_pred <- rep(1, length(y_test))
+for (topic in topics){
+  mask <- c(y_train_svm==topic)+0
+  lasso.svm <- sparseSVM(x_train_svm, mask,nlambda = 10)
+  pred_train <- predict(lasso.svm, x_train_svm, lambda=lasso.svm$lambda, type='class')
+  err <- as.matrix(colSums(abs(pred_train-mask)))
+  lm_index <- which.min(err)
+  mask_test <- c(y_test==topic)+0
+  pred_test <- predict(lasso.svm, x_test_svm, lambda=lasso.svm$lambda[lm_index], type='class')
+  final_pred <- final_pred * (pred_test * (primes[i]-1)+1)
+  acc[i] <- 1 - sum(abs(pred_test-mask_test))/length(y_test)
+  i <- i+1
+}
+ 
+acc  #the accuracies in a one-vs-rest approach for each class seems not bad, but clearly these are unbalanced results...
+#a classifier which says always "rest" is right 7/8 times (0.875) and there are values even less than this...very bad
+
+
+#this cell requires 4 minutes
+```
+
+
+```{r}
+final_pred[30:40]
+length(final_pred)
+sum(final_pred==1) #half of the test does not belong to any class according to these classifiers 
+sum(final_pred == 15 | final_pred==21 | final_pred>23) # 1641 have more than 1 class
+```
+
+
+Let's have a look to the plot of the last sparse SVM fit:
+
+```{r}
+plot(lasso.svm,xvar="norm") #square hinge loss instead of hinge loss
+plot(lasso.svm,xvar="lambda")
+```
+
+
+In conclusion we can say that a Sparse SVM model is not suitable given our task and our limited computational resources.
