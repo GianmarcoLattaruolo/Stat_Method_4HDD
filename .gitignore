@@ -1,3 +1,5 @@
+*.pdf
+all_scarpa_labs.R
 /.DS_Store
 .ipynb_checkpoints
 */.ipynb_checkpoints/*
