@@ -82,7 +82,7 @@ print(X_train.shape)
 ## Multinomial classification
 # do cross validation over the defined values of C
 # alpha = 1
-Cs = (100, 50, 10, 1, 0.1, 0.01, 0.001) 
+Cs = [100.0, 50.0, 10.0, 1.0, 0.1, 0.01, 0.001]
 log1 = LogisticRegressionCV(Cs=Cs, cv=3, random_state=42, max_iter=10000, multi_class='multinomial', solver='saga', n_jobs=-1, penalty='l1')
 log1.fit(X_train, y_train)
 
